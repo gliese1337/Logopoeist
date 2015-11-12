@@ -48,11 +48,17 @@ The left-hand symbol for the _first_ syntax rule in a configuration file will be
 
 Conditional Probability rules are used to manipulate the frequency of certain phonemes in particular contexts, given by the two preceding phonemes in a given word. They have the general form
 
-	{C-class} {C-class} -> {C-class}
+	_ {C-class} ... -> {C-class}
 
-where each `{C-class}` is either a character class variable or a character class literal. An underscore (`_`) can be used in place of the first, or both, conditioning character classes, to indicate word boundaries. Thus, `_ _ -> #A` specifies a distribution of phonemes that can come at the beginning of a word, while `_ #A -> #B` specifies a distribution of phonemes that can come second in a word.
+where each `{C-class}` is either a character class variable or a character class literal. The leading underscore is optional; if present, it indicates a word boundary. Thus, `_ -> #A` specifies a distribution of phonemes that can come at the beginning of a word, while `_ #A -> #B` specifies a distribution of phonemes that can come second in a word.
 
-The frequencies of the conditioning classes are ignored, and the same conditional distribution is assigned to all positions after any pair of phonemes from the conditioning classes in the given order (i.e., the ordered Cartesian product of the conditioning classes).
+Classes preceding the arrow (`->`) are known as _conditioning classes_. The frequencies of the conditioning classes are ignored, and they are used to generate _conditioning n-grams_ from all combinations of phonemes that can be selected from each class in order (i.e., the Cartesian product). The conditional distribution to the right of the arrow is assigned to all positions following any conditioning n-gram derived from the current rule.
+
+A variant on conditional probability rules can be used to indicate that certain phonemes are disallowed in specific position. These have the form
+
+	_ {C-class} ... !> {C-class}
+
+Note the differently shaped arrow- `!>` instead of `->`. In these rules, frequencies are ignored in both conditioning and conditional classes; members of the conditional class are assigned zero probability after any conditioning n-grams derived from these rules, overriding whatever other distributions they might have had due to other rules.
 
 Word Generation
 ---------------
@@ -62,10 +68,10 @@ When generating a word, Logopoeist first creates a phonotactic template for that
 At that point, the template is filled in from left-to-right by
 
 1. Examining the distribution for the character class.
-2. Intersecting the template distribution with the conditional distribution given by the previous two phonemes already generated for the word.
+2. Intersecting the template distribution with any conditional distributions given by the previous phonemes already generated for the word.
 3. Randomly selecting a character from the resulting distribution.
 
-If there are no conditional distribution rules that apply at a certain position, the conditional distribution is assumed to be a uniform distribution over all phonemes in the language. Intersecting distributions means eliminating phonemes that are not present in both distributions, and the multiplying the relative frequencies for each phoneme from each distribution.
+If there are no conditional distribution rules that apply at a certain position, the conditional distribution is implicitly a uniform distribution over all phonemes in the language. Intersecting distributions means eliminating phonemes that are not present in both distributions, and the multiplying the relative frequencies for each phoneme from each distribution.
 
 TODO
 ----

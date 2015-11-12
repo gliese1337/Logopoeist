@@ -58,43 +58,62 @@ class SynModel():
 
 def charModel(conds, vars):
 	model = dict()
-	for (v1, v2, v3) in conds:
-		fchars = ['_'] if v1 == '_' else vars[v1].keys()
-		schars = ['_'] if v2 == '_' else vars[v2].keys()
-		dist = vars[v3]
-		for pair in product(fchars, schars):
-			if pair in model:
-				ndist = model[pair].copy()
+	for (prevars, postvar) in conds:
+		pres = map(lambda v: ['_'] if v == '_' else vars[v].keys(), prevars)
+		dist = vars[postvar]
+		for ngram in product(*pres):
+			if ngram in model:
+				ndist = model[ngram].copy()
 				for c, freq in dist.iteritems():
 					ndist[c] += freq
-				model[pair] = ndist
+				model[ngram] = ndist
 			else:
-				model[pair] = dist
+				model[ngram] = dist
 	return model
 
+def exclusionModel(excls, vars):
+	model = dict()
+	for (prevars, postvar) in excls:
+		pres = map(lambda v: ['_'] if v == '_' else vars[v].keys(), prevars)
+		dist = set(vars[postvar].keys())
+		for ngram in product(*pres):
+			if ngram not in model:
+				model[ngram] = dist.copy()
+			else:
+				model[ngram].update(dist)
+	return model
+
+
 class WordModel():
-	def __init__(self, syntax, conds, vars, start):
+	def __init__(self, syntax, conds, excls, vars, start):
 		self.synmodel = SynModel(syntax, vars, start)
-		self.charmodel = charModel(conds, vars)
+		self.conditions = charModel(conds, vars)
+		self.exclusions = exclusionModel(excls, vars)
 	
 	def generate(self):
 		slots = self.synmodel.generate()
-		clist = ['_', '_']
+		clist = ['_']
 
 		#iterate over distributions for each slot
-		for sdist in slots:
-			#get conditional trigram distribution, if it exists
-			pair = tuple(clist[-2:])
-			if pair in self.charmodel:
-				cdist = self.charmodel[tuple(clist[-2:])]
-				#intersect the two distributions
-				ndist = {
-					char: weight*cdist[char]
-					for char, weight in sdist.iteritems()
-					if char in cdist
-				}
-			else:
-				ndist = sdist
+		for i, sdist in enumerate(slots):
+			ndist = sdist
+			#iterate over conditioning ngrams
+			for j in xrange(1,i+2):
+				ngram = tuple(clist[-j:])
+				
+				#remove any exclusions
+				if ngram in self.exclusions:
+					for char in self.exclusions[ngram]:
+						if char in ndist: del ndist[char]
+
+				#intersect conditioning distributions
+				if ngram in self.conditions:
+					cdist = self.conditions[ngram]
+					ndist = {
+						char: weight*cdist[char]
+						for char, weight in ndist.iteritems()
+						if char in cdist
+					}
 
 			#select a character for this slot in the word
 			total = sum(ndist.values())
@@ -104,7 +123,8 @@ class WordModel():
 				if r <= 0:
 					clist.append(c)
 					break
-		return ''.join(clist[2:])
+
+		return ''.join(clist[1:])
 
 def skipWhite(input):
 	while input.peek() == ' ':
@@ -155,9 +175,7 @@ def parseClass(input, vars):
 def getClassVar(input, vars):
 	skipWhite(input)
 	c = input.peek()
-	if c == '_':
-		return input.next()
-	elif c == '#':
+	if c == '#':
 		return getToken(input)
 	elif c == '<':
 		return parseClass(input, vars)
@@ -196,21 +214,26 @@ def parseSyntax(input, syntax, vars):
 
 	return sym
 
-def parseCondition(input, v1, v2, conds, vars):
+def parseCondition(input, cond_vars, conds, excls, vars):
 	skipWhite(input)
-	if getN(input, 2) != '->':
-		raise Exception("Expected -> in Conditional Probability statement")
-	conds.append((v1, v2, getClassVar(input, vars)))
+	arrow = getN(input, 2)
+	if arrow == '->':
+		conds.append((cond_vars, getClassVar(input, vars)))
+	elif arrow == '!>':
+		excls.append((cond_vars, getClassVar(input, vars)))
+	else:
+		raise Exception("Expected -> or !> in Conditional Probability statement")
 
 def parseDefinition(input, v, vars):
 	input.next() #skip '='
 	vars[v] = vars[getClassVar(input, vars)]
 
-def parseCondOrDef(input, conds, vars):
-	var1 = getClassVar(input, vars)
+def parseCondOrDef(input, conds, excls, vars):
+	skipWhite(input)
+	var1 = input.next() if input.peek() == '_'\
+						else getClassVar(input, vars)
 	
 	skipWhite(input)
-
 	c = input.peek()
 	if c == "=":
 		if var1 == '_':
@@ -218,16 +241,18 @@ def parseCondOrDef(input, conds, vars):
 		parseDefinition(input, var1, vars)
 		return
 
-	var2 = getClassVar(input, vars)
-	if var2 == "_" and var1 != "_":
-		raise Exception("_ cannot occur after a Character Class")
+	cond_vars = [var1]
+	while True:
+		try:
+			cond_vars.append(getClassVar(input, vars))
+		except: break
 
-	parseCondition(input, var1, var2, conds, vars)
+	parseCondition(input, tuple(cond_vars), conds, excls, vars)
 
 def parse(input):
 	syntax = dict()
 	vars = dict()
-	conds = []
+	conds, excls = [], []
 	start = None
 	while input.peek() != "":
 		skipWhite(input)
@@ -237,17 +262,18 @@ def parse(input):
 			if start is None:
 				start = sym
 		elif c in ["#", "_", "<"]:
-			parseCondOrDef(input, conds, vars)
+			parseCondOrDef(input, conds, excls, vars)
 		else:
 			while input.peek() != '\n':
 				input.next()
 			input.next()
-	return WordModel(syntax, conds, vars, start)
+	return WordModel(syntax, conds, excls, vars, start)
 
 model = parse(IStream(sys.stdin))
 words = set()
 target = int(sys.argv[1]) if len(sys.argv) > 1 else 10
 while len(words) < target:
-	words.add(model.generate())
-for w in sorted(words):
-	print w
+	word = model.generate()
+	if word not in words:
+		words.add(word)
+		print word
