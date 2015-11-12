@@ -193,7 +193,7 @@ def parseSyntax(input, syntax, vars):
 	skipWhite(input)
 
 	c = input.peek()
-	while c != '\n':
+	while c not in ['\n', ';']:
 		if c == '#' or c == '<':
 			vlist.append(('#', getClassVar(input, vars)))
 		elif c == '$':
@@ -263,10 +263,12 @@ def parse(input):
 				start = sym
 		elif c in ["#", "_", "<"]:
 			parseCondOrDef(input, conds, excls, vars)
-		else:
-			while input.peek() != '\n':
+		elif c in [';', '\r', '\n']:
+			while input.peek() not in ['\n','']:
 				input.next()
 			input.next()
+		else:
+			raise Exception("Syntax Error; Unexpected "+repr(c))
 	return WordModel(syntax, conds, excls, vars, start)
 
 model = parse(IStream(sys.stdin))
